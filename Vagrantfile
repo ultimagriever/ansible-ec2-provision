@@ -69,5 +69,8 @@ Vagrant.configure("2") do |config|
     apt-add-repository ppa:ansible/ansible
     apt-get update
     apt-get install ansible awscli -y
+    python -m easy_install pip
+    python -m pip install boto
+    python -m pip install boto3
   SHELL
 end
