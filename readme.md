@@ -20,3 +20,16 @@ you need an IAM user with said create/attach privileges):
 **Important**: running this playbook against your AWS
 account might incur charges related to each product's
 pricing, regardless of Free Tier usage.
+
+## Control Machine Configuration
+
+To run this playbook, you need to install the [AWS CLI](https://aws.amazon.com/cli)
+and configure your environment.
+
+```bash
+# Set your AWS Access Key/Secret Key
+aws configure
+
+# Run the Ansible playbook
+ansible-playbook playbook.yml
+```
