@@ -1,0 +1,12 @@
+default_region: us-east-1
+
+# VPC variables
+vpc_cidr_block: 10.0.0.0/16
+
+public_us_east_1a_cidr_block: 10.0.1.0/28
+public_us_east_1b_cidr_block: 10.0.1.128/28
+private_us_east_1c_cidr_block: 10.0.2.0/28
+private_us_east_1d_cidr_block: 10.0.2.128/28
+
+# EC2 variables
+default_ami: ami-41e0b93b

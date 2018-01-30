@@ -1,0 +1,246 @@
+- name: create vpc
+  ec2_vpc_net:
+    cidr_block: "{{ vpc_cidr_block }}"
+    name: NodeJSMongoVPC
+    region: "{{ default_region }}"
+    tags:
+      Name: NodeJSMongoVPC
+      from: ansible
+  register: create_vpc_return
+
+- name: create internet gateway
+  ec2_vpc_igw:
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    tags:
+      Name: NodeJSMongoIGW
+      from: ansible
+  register: create_igw_return
+
+- name: create public subnet - us-east-1a
+  ec2_vpc_subnet:
+    az: us-east-1a
+    cidr: "{{ public_us_east_1a_cidr_block }}"
+    map_public: true
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    tags:
+      Name: "{{ public_us_east_1a_cidr_block }} - us-east-1a"
+      from: ansible
+  register: public_us_east_1a
+
+- name: create public subnet - us-east-1b
+  ec2_vpc_subnet:
+    az: us-east-1b
+    cidr: "{{ public_us_east_1b_cidr_block }}"
+    map_public: true
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    tags:
+      Name: "{{ public_us_east_1b_cidr_block }} - us-east-1b"
+      from: ansible
+  register: public_us_east_1b
+
+- name: create private subnet - us-east-1c
+  ec2_vpc_subnet:
+    az: us-east-1c
+    cidr: "{{ private_us_east_1c_cidr_block }}"
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    tags:
+      Name: "{{ private_us_east_1c_cidr_block }} - us-east-1c"
+      from: ansible
+  register: private_us_east_1c
+
+- name: create private subnet - us-east-1d
+  ec2_vpc_subnet:
+    az: us-east-1d
+    cidr: "{{ private_us_east_1d_cidr_block }}"
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    tags:
+      Name: "{{ private_us_east_1d_cidr_block }} - us-east-1d"
+      from: ansible
+  register: private_us_east_1d
+
+- name: create public route table
+  ec2_vpc_route_table:
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ create_igw_return.gateway_id }}"
+    subnets:
+      - "{{ public_us_east_1a.subnet.id }}"
+      - "{{ public_us_east_1b.subnet.id }}"
+    tags:
+      Name: Public Route Table
+      from: ansible
+
+- name: create nat gateway for us-east-1a
+  ec2_vpc_nat_gateway:
+    region: "{{ default_region }}"
+    subnet_id: "{{ public_us_east_1a.subnet.id }}"
+    if_exist_do_not_create: True
+  register: nat_gateway_us_east_1a
+
+- name: create nat gateway for us-east-1b
+  ec2_vpc_nat_gateway:
+    region: "{{ default_region }}"
+    subnet_id: "{{ public_us_east_1b.subnet.id }}"
+    if_exist_do_not_create: True
+  register: nat_gateway_us_east_1b
+
+- name: create private route table for us-east-1c
+  ec2_vpc_route_table:
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ nat_gateway_us_east_1a.nat_gateway_id }}"
+    subnets:
+      - "{{ private_us_east_1c.subnet.id }}"
+    tags:
+      Name: Private Route Table - us-east-1c
+      from: ansible
+
+- name: create private route table for us-east-1d
+  ec2_vpc_route_table:
+    region: "{{ default_region }}"
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    routes:
+      - dest: 0.0.0.0/0
+        gateway_id: "{{ nat_gateway_us_east_1b.nat_gateway_id }}"
+    subnets:
+      - "{{ private_us_east_1d.subnet.id }}"
+    tags:
+      Name: Private Route Table - us-east-1d
+      from: ansible
+
+- name: create DMZ security group
+  ec2_group:
+    name: NodeJSMongoDMZ
+    description: Demilitarized zone for public internet access
+    region: "{{ default_region }}"
+    tags:
+      Name: NodeJSMongoDMZ
+      from: ansible
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    rules:
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        cidr_ip: 0.0.0.0/0
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        cidr_ip: 0.0.0.0/0
+  register: elb_sg
+
+- name: get own public ip
+  shell: dig +short myip.opendns.com @resolver1.opendns.com
+  register: own_public_ip
+
+- name: create security group for public EC2 instances
+  ec2_group:
+    name: PublicEC2SG
+    description: Prevents users from accessing EC2 instances directly - instead, they should access from ELB
+    region: "{{ default_region }}"
+    tags:
+      Name: PublicEC2SG
+      from: ansible
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    rules:
+      - proto: tcp
+        from_port: 80
+        to_port: 80
+        group_id: "{{ elb_sg.group_id }}"
+      - proto: tcp
+        from_port: 443
+        to_port: 443
+        group_id: "{{ elb_sg.group_id }}"
+      - proto: tcp
+        from_port: 22
+        to_port: 22
+        cidr_ip: "{{ own_public_ip.stdout }}/32"
+  register: public_ec2_sg
+
+- name: create private instance security group
+  ec2_group:
+    name: MongoDBSG
+    description: Database security group
+    tags:
+      Name: MongoDBSG
+      from: ansible
+    vpc_id: "{{ create_vpc_return.vpc.id }}"
+    region: "{{ default_region }}"
+    rules:
+      - proto: tcp
+        from_port: 27017
+        to_port: 27017
+        group_id: "{{ public_ec2_sg.group_id }}"
+  register: private_ec2_sg
+
+- name: create ec2 keypair
+  ec2_key:
+    key_material: "{{ item }}"
+    name: MyWebServiceNodejs
+    region: "{{ default_region }}"
+  with_file: /home/vagrant/.ssh/id_rsa.pub
+  register: keypair
+
+- name: create public ec2 instance in us-east-1a
+  ec2:
+    assign_public_ip: yes
+    count: 1
+    group_id: "{{ public_ec2_sg.group_id }}"
+    image: "{{ default_ami }}"
+    instance_tags:
+      Name: PublicInstance - us-east-1a
+      from: ansible
+    instance_type: t2.micro
+    region: "{{ default_region }}"
+    vpc_subnet_id: "{{ public_us_east_1a.subnet.id }}"
+    key_name: MyWebServiceNodejs
+
+- name: create public ec2 instance in us-east-1b
+  ec2:
+    assign_public_ip: yes
+    count: 1
+    group_id: "{{ public_ec2_sg.group_id }}"
+    image: "{{ default_ami }}"
+    instance_tags:
+      Name: Public Instance - us-east-1b
+      from: ansible
+    instance_type: t2.micro
+    region: "{{ default_region }}"
+    vpc_subnet_id: "{{ public_us_east_1b.subnet.id }}"
+    key_name: MyWebServiceNodejs
+
+- name: create private ec2 instance in us-east-1c
+  ec2:
+    assign_public_ip: no
+    count: 1
+    group_id: "{{ private_ec2_sg.group_id }}"
+    image: "{{ default_ami }}"
+    instance_tags:
+      Name: Private Instance - us-east-1c
+      from: ansible
+    instance_type: t2.micro
+    region: "{{ default_region }}"
+    vpc_subnet_id: "{{ private_us_east_1c.subnet.id }}"
+    key_name: MyWebServiceNodejs
+
+- name: create private ec2 instance in us-east-1d
+  ec2:
+    assign_public_ip: no
+    count: 1
+    group_id: "{{ private_ec2_sg.group_id }}"
+    image: "{{ default_ami }}"
+    instance_tags:
+      Name: Private Instance - us-east-1d
+      from: ansible
+    instance_type: t2.micro
+    region: "{{ default_region }}"
+    vpc_subnet_id: "{{ private_us_east_1d.subnet.id }}"
+    key_name: MyWebServiceNodejs
