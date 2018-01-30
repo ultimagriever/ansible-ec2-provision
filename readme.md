@@ -31,5 +31,5 @@ and configure your environment.
 aws configure
 
 # Run the Ansible playbook
-ansible-playbook playbook.yml
+AWS_PROFILE=default ansible-playbook playbook.yml -i hosts
 ```
